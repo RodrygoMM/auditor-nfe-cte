@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Configuração Técnica - Conferencia NF</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+    <div class="container">
+        <h1>Configuração Técnica</h1>
+        <p>Use esta página apenas para configurar a autenticação técnica do Firebase. A senha não será armazenada.</p>
+        <div id="status"></div>
+        <section class="panel">
+            <div class="row">
+                <label for="email">E-mail técnico</label>
+                <input id="email" type="email" value="teste@teste.com.br" />
+            </div>
+            <div class="row">
+                <label for="password">Senha técnica</label>
+                <input id="password" type="password" placeholder="********" maxlength="4" inputmode="numeric" />
+            </div>
+            <button id="signInBtn">Autenticar</button>
+            <button id="clearSessionBtn" class="secondary">Limpar sessão técnica</button>
+        </section>
+        <section class="panel">
+            <h2>Instruções</h2>
+            <ul>
+                <li>Este formulário não salva a senha técnica.</li>
+                <li>Após autenticar, a sessão pode ser usada pela extensão.</li>
+                <li>Se você quiser mudar a conta técnica, limpe a sessão e autentique novamente.</li>
+            </ul>
+        </section>
+    </div>
+    <script src="firebaseConfig.js"></script>
+    <script src="options.js"></script>
+</body>
+
+</html>
