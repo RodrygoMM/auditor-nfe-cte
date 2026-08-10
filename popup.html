@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Conferencia NF</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body>
+    <div class="container">
+        <div id="status"></div>
+        <section class="panel" id="technicalPanel">
+            <div class="row">
+                <label for="email">E-mail técnico</label>
+                <input id="email" type="email" placeholder="teste@teste.com.br" />
+            </div>
+            <div class="row">
+                <label for="password">Senha técnica</label>
+                <input id="password" type="password" placeholder="********" />
+            </div>
+            <div class="row admin-actions">
+                <button id="signInBtn">Confirmar</button>
+                <button id="clearSessionBtn" class="secondary">Limpar sessão</button>
+            </div>
+            <small class="helper">A senha não será armazenada. Se já existir sessão, basta confirmar.</small>
+        </section>
+        <section class="panel hidden" id="mainPanel">
+            <h2>Registrar Conferência</h2>
+            <div class="row">
+                <label for="usuario">Usuário</label>
+                <select id="usuario"></select>
+            </div>
+            <div class="row">
+                <label id="placaLabel" for="placaInput">Placa *</label>
+                <div class="combo">
+                    <input id="placaInput" aria-labelledby="placaLabel" role="combobox" aria-expanded="false"
+                        aria-controls="placaDropdown" aria-haspopup="listbox" aria-autocomplete="list" type="text"
+                        autocomplete="off" placeholder="Selecione uma placa..." />
+                    <div id="placaDropdown" class="dropdown hidden" role="listbox" aria-labelledby="placaLabel"></div>
+                </div>
+            </div>
+            <div class="row">
+                <label for="cliente">Cliente</label>
+                <input id="cliente" type="text" placeholder="Opcional" />
+            </div>
+            <div class="row admin-actions first-row">
+                <button id="saveBtn">Salvar</button>
+                <button id="openSearchBtn" class="secondary">Consultar</button>
+            </div>
+            <div class="row admin-actions second-row">
+                <button id="openExtractBtn" class="secondary action-button">Extrato</button>
+                <button id="openProductivityBtn" class="secondary action-button">Produção</button>
+            </div>
+            <div class="row admin-actions third-row">
+                <button id="adminAccessBtn" class="secondary">⚙ Administração</button>
+            </div>
+        </section>
+        <section class="panel hidden" id="searchPanel">
+            <h2>Consultar placa</h2>
+            <div class="row">
+                <label for="searchPlaca">Placa</label>
+                <select id="searchPlaca"></select>
+            </div>
+            <div class="row">
+                <label for="searchUsuario">Usuário</label>
+                <select id="searchUsuario"></select>
+            </div>
+            <div class="row admin-actions">
+                <button id="searchBtn" type="button">Buscar</button>
+                <button id="searchBackBtn" type="button" class="secondary">Voltar</button>
+                <button id="editEventBtn" type="button" class="secondary hidden">Editar evento</button>
+            </div>
+            <div id="searchResult" class="result-box"></div>
+        </section>
+        <section class="panel hidden" id="editEventPanel">
+            <h2>Editar evento</h2>
+            <div class="row">
+                <label for="editEventPlaca">Placa *</label>
+                <select id="editEventPlaca"></select>
+            </div>
+            <div class="row">
+                <label for="editEventUsuario">Usuário *</label>
+                <select id="editEventUsuario"></select>
+            </div>
+            <div class="row">
+                <label for="editEventCliente">Cliente</label>
+                <input id="editEventCliente" type="text" placeholder="Opcional" />
+            </div>
+            <div class="row admin-actions">
+                <button id="saveEventEditBtn">Salvar edição</button>
+                <button id="cancelEventEditBtn" class="secondary">Cancelar</button>
+            </div>
+        </section>
+        <section class="panel hidden" id="extractPanel">
+            <h2>Extrato do dia</h2>
+            <div class="row">
+                <label for="extractDayDate">Data</label>
+                <input id="extractDayDate" type="date" />
+            </div>
+            <div class="row admin-actions">
+                <button id="extractDailyBtn">Pesquisar</button>
+                <button id="extractBackBtn" class="secondary">Voltar</button>
+            </div>
+            <div id="extractResult" class="result-box"></div>
+        </section>
+        <section class="panel hidden" id="productivityPanel">
+            <h2>Produtividade de Conferência</h2>
+            <div class="row">
+                <label for="productivityDate">Data</label>
+                <input id="productivityDate" type="date" />
+            </div>
+            <div class="row admin-actions">
+                <button id="productivitySearchBtn">Pesquisar</button>
+                <button id="productivityBackBtn" class="secondary">Voltar</button>
+            </div>
+            <div id="productivityResult" class="result-box"></div>
+        </section>
+        <section class="panel hidden" id="auditPanel">
+            <h2>Auditoria</h2>
+            <div class="row">
+                <label for="auditPlaca">Placa</label>
+                <select id="auditPlaca">
+                    <option value="">Selecione uma placa...</option>
+                </select>
+            </div>
+            <div class="row">
+                <label for="auditStartDate">Data início</label>
+                <input id="auditStartDate" type="date" />
+            </div>
+            <div class="row">
+                <label for="auditEndDate">Data fim</label>
+                <input id="auditEndDate" type="date" />
+            </div>
+            <div class="row admin-actions">
+                <button id="auditSearchBtn" type="button">Buscar auditoria</button>
+                <button id="auditBackBtn" type="button" class="secondary">Voltar</button>
+            </div>
+            <div id="auditResult" class="result-box"></div>
+        </section>
+        <section class="panel hidden" id="adminScreenPanel">
+            <section class="panel" id="adminAuthPanel">
+                <h2>Acesso administrativo</h2>
+                <div class="row">
+                    <label for="adminPin">PIN do líder</label>
+                    <input id="adminPin" type="password" placeholder="PIN do líder" maxlength="4" inputmode="numeric" />
+                </div>
+                <div class="row admin-actions">
+                    <button id="adminPinConfirmBtn">Confirmar</button>
+                    <button id="adminPinCancelBtn" class="secondary">Cancelar</button>
+                </div>
+            </section>
+            <section class="panel hidden" id="adminDashboardPanel">
+                <h2>Administração</h2>
+                <div class="admin-actions">
+                    <button id="adminUsersBtn">Usuários</button>
+                    <button id="adminPlatesBtn">Placas</button>
+                    <button id="adminEditEventBtn">Editar evento</button>
+                    <button id="adminAuditBtn">Auditoria</button>
+                </div>
+            </section>
+            <section class="panel hidden" id="adminUserPanel">
+                <h3>Usuários</h3>
+                <div class="row">
+                    <label for="adminUserSelect">Selecionar usuário</label>
+                    <select id="adminUserSelect">
+                        <option value="">Selecione um usuário...</option>
+                    </select>
+                </div>
+                <div class="row">
+                    <label for="userName">Nome *</label>
+                    <input id="userName" type="text" placeholder="Nome do usuário" />
+                </div>
+                <div class="row hidden" id="userPasswordRow">
+                    <label for="userPassword">PIN</label>
+                    <input id="userPassword" type="text" placeholder="PIN do usuário" maxlength="4"
+                        inputmode="numeric" />
+                </div>
+                <div class="row horizontal-row">
+                    <label><input id="userLider" type="checkbox" /> Líder</label>
+                    <label><input id="userAtivo" type="checkbox" checked /> Ativo</label>
+                </div>
+                <div class="row admin-actions">
+                    <button id="saveUserBtn">Salvar usuário</button>
+                    <button id="deleteUserBtn" class="secondary">Excluir usuário</button>
+                    <button id="clearUserBtn" class="secondary">Limpar</button>
+                </div>
+            </section>
+            <section class="panel hidden" id="adminPlatePanel">
+                <h3>Placas</h3>
+                <div class="row">
+                    <label for="adminPlateSelect">Selecionar placa</label>
+                    <select id="adminPlateSelect">
+                        <option value="">Selecione uma placa...</option>
+                    </select>
+                </div>
+                <div class="row">
+                    <label for="plateName">Placa *</label>
+                    <input id="plateName" type="text" placeholder="CWB001" />
+                </div>
+                <div class="row horizontal-row">
+                    <label><input id="plateAtivo" type="checkbox" checked /> Ativa</label>
+                </div>
+                <div class="row admin-actions">
+                    <button id="savePlateBtn">Salvar placa</button>
+                    <button id="deletePlateBtn" class="secondary">Excluir placa</button>
+                    <button id="clearPlateBtn" class="secondary">Limpar</button>
+                    <button id="closePlatePanelBtn" class="secondary">Fechar</button>
+                </div>
+            </section>
+        </section>
+    </div>
+    <script src="firebaseConfig.js"></script>
+    <script src="popup.js"></script>
+</body>
+
+</html>
