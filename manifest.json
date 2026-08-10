@@ -1,0 +1,21 @@
+{
+    "manifest_version": 3,
+    "name": "Conferencia NF",
+    "description": "Extensão Chrome para registrar e localizar conferências de cargas.",
+    "version": "0.1.0",
+    "action": {
+        "default_popup": "popup.html"
+    },
+    "permissions": [
+        "storage"
+    ],
+    "host_permissions": [
+        "https://identitytoolkit.googleapis.com/*",
+        "https://securetoken.googleapis.com/*",
+        "https://firestore.googleapis.com/*"
+    ],
+    "options_page": "options.html",
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'self'"
+    }
+}
