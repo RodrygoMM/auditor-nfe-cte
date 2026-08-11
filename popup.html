@@ -49,10 +49,11 @@
                 <button id="saveBtn">Salvar</button>
                 <button id="openSearchBtn" class="secondary">Consultar</button>
             </div>
+            <!--
             <div class="row admin-actions second-row">
                 <button id="openExtractBtn" class="secondary action-button">Extrato</button>
                 <button id="openProductivityBtn" class="secondary action-button">Produção</button>
-            </div>
+            </div>-->
             <div class="row admin-actions third-row">
                 <button id="adminAccessBtn" class="secondary">⚙ Administração</button>
             </div>
@@ -143,8 +144,8 @@
             <section class="panel" id="adminAuthPanel">
                 <h2>Acesso administrativo</h2>
                 <div class="row">
-                    <label for="adminPin">PIN do líder</label>
-                    <input id="adminPin" type="password" placeholder="PIN do líder" maxlength="4" inputmode="numeric" />
+                    <label for="adminPin">PIN</label>
+                    <input id="adminPin" type="password" placeholder="PIN" maxlength="4" inputmode="numeric" />
                 </div>
                 <div class="row admin-actions">
                     <button id="adminPinConfirmBtn">Confirmar</button>
@@ -155,9 +156,11 @@
                 <h2>Administração</h2>
                 <div class="admin-actions">
                     <button id="adminUsersBtn">Usuários</button>
-                    <button id="adminPlatesBtn">Placas</button>
+                    <!-- <button id="adminPlatesBtn">Placas</button> -->
                     <button id="adminEditEventBtn">Editar evento</button>
                     <button id="adminAuditBtn">Auditoria</button>
+                    <button id="openExtractBtn" class="secondary">Extrato</button>
+                    <button id="openProductivityBtn" class="secondary">Produção</button>
                 </div>
             </section>
             <section class="panel hidden" id="adminUserPanel">
@@ -178,7 +181,7 @@
                         inputmode="numeric" />
                 </div>
                 <div class="row horizontal-row">
-                    <label><input id="userLider" type="checkbox" /> Líder</label>
+                    <label><input id="userLider" type="checkbox" /> Pin</label>
                     <label><input id="userAtivo" type="checkbox" checked /> Ativo</label>
                 </div>
                 <div class="row admin-actions">

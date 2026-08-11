@@ -84,6 +84,7 @@ const closePlatePanelBtn = document.getElementById("closePlatePanelBtn");
 let idToken = null;
 let refreshToken = null;
 let usuarios = [];
+let firestoreUsuarios = [];
 let placas = [];
 let allPlacasOptions = [];
 let editingUserId = null;
@@ -92,6 +93,12 @@ let editingEventDoc = null;
 let adminContext = "admin";
 let currentAdminLeaderName = null;
 let adminSearchMode = false;
+
+function safeSetInnerHTML(element, html) {
+    if (element) {
+        element.innerHTML = html;
+    }
+}
 
 function setStatus(message, isError = false) {
     if (!statusEl) return;
@@ -225,6 +232,43 @@ function savePreferredUsuario(usuario) {
     return setStorage({ [PREFERRED_USER_KEY]: usuario });
 }
 
+async function loadLocalAccessLists() {
+    try {
+        const response = await fetch(chrome.runtime.getURL("usuarios_placas.json"));
+        if (!response.ok) {
+            throw new Error(`Falha ao carregar lista local: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const usuariosLocais = Array.isArray(data.usuarios)
+            ? data.usuarios
+                .filter((nome) => String(nome || "").trim())
+                .map((nome, index) => ({
+                    id: `local-user-${index + 1}`,
+                    nome: String(nome).trim(),
+                    lider: false,
+                    ativo: true,
+                    password: "",
+                }))
+            : [];
+
+        const placasLocais = Array.isArray(data.placas)
+            ? data.placas
+                .filter((placa) => String(placa || "").trim())
+                .map((placa, index) => ({
+                    id: `local-plate-${index + 1}`,
+                    placa: String(placa).trim().toUpperCase(),
+                    ativo: true,
+                }))
+            : [];
+
+        return { usuarios: usuariosLocais, placas: placasLocais };
+    } catch (error) {
+        console.warn("Não foi possível carregar a lista local de usuários/placas:", error);
+        return { usuarios: [], placas: [] };
+    }
+}
+
 async function signInTechnical() {
     const email = emailInput.value.trim();
     const password = passwordInput.value.trim();
@@ -304,6 +348,19 @@ function buildFirestoreDocument(fields) {
     return { fields };
 }
 
+async function parseResponseBody(response) {
+    const text = await response.text();
+    if (!text) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        return { rawText: text };
+    }
+}
+
 async function fetchWithAuth(url, options = {}) {
     const headers = {
         ...options.headers,
@@ -335,42 +392,20 @@ async function createDocument(collection, fields, documentId) {
         },
         body: JSON.stringify(buildFirestoreDocument(fields)),
     });
-    const data = await response.json();
+    const data = await parseResponseBody(response);
     if (!response.ok) {
-        const error = new Error(data.error?.message || `Falha ao criar documento em ${collection}`);
+        const message = data?.error?.message || data?.rawText || `Falha ao criar documento em ${collection}`;
+        const error = new Error(message);
         error.status = response.status;
         throw error;
     }
-    return data;
+    return data || {};
 }
 
 async function ensureFirestoreCollections() {
-    const collections = ["usuarios", "placas", "eventos", "auditoria"];
-    for (const collection of collections) {
-        console.log(`Inicializando coleção Firestore: ${collection}`);
-        try {
-            await createDocument(
-                collection,
-                { __initialized: { booleanValue: true } },
-                `__init_${collection}`
-            );
-            console.log(`Coleção inicializada ou já existente: ${collection}`);
-        } catch (error) {
-            const message = String(error?.message || error || "").toLowerCase();
-            const isAlreadyExists = error?.status === 409 || message.includes("already exists") || message.includes("alread exists") || message.includes("document already exists");
-            if (isAlreadyExists) {
-                console.log(`Coleção ${collection} já estava inicializada.`);
-                continue;
-            }
-            if (message.includes("cloud firestore api has not been used") || message.includes("firestore.googleapis.com") || message.includes("api has not been used in project")) {
-                throw new Error(
-                    "A API Cloud Firestore não está habilitada para este projeto Firebase. Ative-a em https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=" + PROJECT_ID + " e tente novamente."
-                );
-            }
-            console.warn(`Erro ao inicializar coleção ${collection}:`, error);
-            throw new Error(`Falha ao inicializar coleção ${collection}: ${error?.message || error}`);
-        }
-    }
+    // O arquivo local continua sendo a fonte de verdade para usuários/placas.
+    // O Firestore é usado apenas para registrar os eventos, então não bloqueamos o fluxo se não estiver disponível.
+    return;
 }
 
 async function patchDocument(documentName, fields) {
@@ -385,15 +420,52 @@ async function patchDocument(documentName, fields) {
         },
         body: JSON.stringify(buildFirestoreDocument(fields)),
     });
-    const data = await response.json();
+    const data = await parseResponseBody(response);
     if (!response.ok) {
-        throw new Error(data.error?.message || "Falha ao atualizar documento.");
+        throw new Error(data?.error?.message || data?.rawText || "Falha ao atualizar documento.");
     }
-    return data;
+    return data || {};
 }
 
+async function fetchFirestoreUsuarios() {
+    const url = `${FIRESTORE_URL}/usuarios?pageSize=200`;
+    const response = await fetchWithAuth(url, {
+        headers: { "Content-Type": "application/json" },
+    });
+    const data = await parseResponseBody(response);
+    if (!response.ok) {
+        throw new Error(data?.error?.message || data?.rawText || "Falha ao carregar usuários do Firestore.");
+    }
+    return Array.isArray(data?.documents) ? data.documents : [];
+}
+
+async function loadFirestoreUsuarios() {
+    try {
+        const docs = await fetchFirestoreUsuarios();
+        firestoreUsuarios = docs
+            .map((doc) => {
+                const fields = doc.fields || {};
+                return {
+                    id: doc.name,
+                    nome: getFirestoreStringValue(fields.nome),
+                    lider: getFirestoreBooleanValue(fields.lider),
+                    ativo: fields.ativo !== undefined ? getFirestoreBooleanValue(fields.ativo) : true,
+                    password: getFirestoreStringValue(fields.password),
+                };
+            })
+            .filter((user) => user.nome);
+        return firestoreUsuarios;
+    } catch (error) {
+        setStatus("Erro ao carregar usuários do Firestore.", true);
+        return [];
+    }
+}
 
 function toggleUserPasswordField() {
+    if (!userLiderCheckbox || !userPasswordRow || !userPasswordInput) {
+        return;
+    }
+
     if (userLiderCheckbox.checked) {
         userPasswordRow.classList.remove("hidden");
         userPasswordInput.setAttribute("maxlength", "4");
@@ -414,7 +486,7 @@ function isPasswordDuplicate(password, ignoreUserId = null) {
         return false;
     }
 
-    return usuarios.some((user) => {
+    return firestoreUsuarios.some((user) => {
         if (ignoreUserId && user.id === ignoreUserId) {
             return false;
         }
@@ -424,99 +496,83 @@ function isPasswordDuplicate(password, ignoreUserId = null) {
 
 function setUserForm(user) {
     editingUserId = user.id;
-    userNameInput.value = user.nome;
-    userPasswordInput.value = "";
-    userLiderCheckbox.checked = user.lider;
-    userAtivoCheckbox.checked = user.ativo;
+    if (userNameInput) userNameInput.value = user.nome;
+    if (userPasswordInput) userPasswordInput.value = "";
+    if (userLiderCheckbox) userLiderCheckbox.checked = user.lider;
+    if (userAtivoCheckbox) userAtivoCheckbox.checked = user.ativo;
     toggleUserPasswordField();
     setStatus(`Editando usuário ${user.nome}`);
 }
 
 function clearUserForm() {
     editingUserId = null;
-    adminUserSelect.value = "";
-    userNameInput.value = "";
-    userPasswordInput.value = "";
-    userLiderCheckbox.checked = false;
-    userAtivoCheckbox.checked = true;
+    if (adminUserSelect) adminUserSelect.value = "";
+    if (userNameInput) userNameInput.value = "";
+    if (userPasswordInput) userPasswordInput.value = "";
+    if (userLiderCheckbox) userLiderCheckbox.checked = false;
+    if (userAtivoCheckbox) userAtivoCheckbox.checked = true;
     toggleUserPasswordField();
     setStatus("Formulário de usuário limpo.");
 }
 
 function setPlateForm(plate) {
     editingPlateId = plate.id;
-    plateNameInput.value = plate.placa;
-    plateAtivoCheckbox.checked = plate.ativo;
+    if (plateNameInput) plateNameInput.value = plate.placa;
+    if (plateAtivoCheckbox) plateAtivoCheckbox.checked = plate.ativo;
     setStatus(`Editando placa ${plate.placa}`);
 }
 
 function clearPlateForm() {
     editingPlateId = null;
-    adminPlateSelect.value = "";
-    plateNameInput.value = "";
-    plateAtivoCheckbox.checked = true;
+    if (adminPlateSelect) adminPlateSelect.value = "";
+    if (plateNameInput) plateNameInput.value = "";
+    if (plateAtivoCheckbox) plateAtivoCheckbox.checked = true;
     setStatus("Formulário de placa limpo.");
 }
 
 async function loadUsuarios() {
     try {
-        const query = `${FIRESTORE_URL}/usuarios?pageSize=200`;
-        const response = await fetchWithAuth(query, {
-            headers: { "Content-Type": "application/json" },
-        });
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data.error?.message || "Falha ao carregar usuários.");
+        const { usuarios: usuariosLocais } = await loadLocalAccessLists();
+        usuarios = usuariosLocais;
+
+        if (usuarioSelect) {
+            safeSetInnerHTML(usuarioSelect, "");
         }
 
-        usuarios = [];
-        usuarioSelect.innerHTML = "";
         let activeUserCount = 0;
 
-        if (data.documents) {
-            data.documents.forEach((doc) => {
-                const fields = doc.fields || {};
-                const nome = getFirestoreStringValue(fields.nome);
-                const ativo = fields.ativo !== undefined ? getFirestoreBooleanValue(fields.ativo) : true;
-                const lider = fields.lider !== undefined ? getFirestoreBooleanValue(fields.lider) : false;
-                if (!nome) return;
+        const preferredUser = await loadPreferredUsuario();
 
-                usuarios.push({
-                    id: doc.name,
-                    nome,
-                    lider,
-                    ativo,
-                    password: getFirestoreStringValue(fields.password),
-                });
+        usuarios.forEach((user) => {
+            if (!user.ativo) return;
+            activeUserCount += 1;
+            if (usuarioSelect) {
+                const item = document.createElement("option");
+                item.value = user.nome;
+                item.textContent = user.nome === preferredUser ? `★ ${user.nome}` : user.nome;
+                usuarioSelect.appendChild(item);
+            }
+        });
 
-                if (ativo) {
-                    activeUserCount += 1;
-                    const item = document.createElement("option");
-                    item.value = nome;
-                    item.textContent = nome;
-                    usuarioSelect.appendChild(item);
-                }
-            });
-        }
-
-        if (activeUserCount === 0) {
-            usuarioSelect.innerHTML = "<option value=\"\">Nenhum usuário ativo</option>";
-        } else {
-            const preferredUser = await loadPreferredUsuario();
-            if (preferredUser && Array.from(usuarioSelect.options).some((opt) => opt.value === preferredUser)) {
+        if (usuarioSelect) {
+            if (activeUserCount === 0) {
+                safeSetInnerHTML(usuarioSelect, "<option value=\"\">Nenhum usuário ativo</option>");
+            } else if (preferredUser && Array.from(usuarioSelect.options).some((opt) => opt.value === preferredUser)) {
                 usuarioSelect.value = preferredUser;
             }
         }
 
-        adminUserSelect.innerHTML = "<option value=\"\">Selecione um usuário...</option>";
-        usuarios.forEach((user) => {
-            const userOption = document.createElement("option");
-            userOption.value = user.id;
-            userOption.textContent = user.ativo ? user.nome : `${user.nome} (Inativo)`;
-            adminUserSelect.appendChild(userOption);
-        });
+        if (adminUserSelect) {
+            safeSetInnerHTML(adminUserSelect, "<option value=\"\">Selecione um usuário...</option>");
+            usuarios.forEach((user) => {
+                const userOption = document.createElement("option");
+                userOption.value = user.id;
+                userOption.textContent = user.ativo ? user.nome : `${user.nome} (Inativo)`;
+                adminUserSelect.appendChild(userOption);
+            });
+        }
 
-        setStatus("Usuários carregados.");
+        setStatus("Usuários carregados do arquivo local.");
     } catch (error) {
         setStatus("Erro ao carregar usuários.", true);
         throw error;
@@ -525,41 +581,33 @@ async function loadUsuarios() {
 
 async function loadPlates() {
     try {
-        const query = `${FIRESTORE_URL}/placas?pageSize=200`;
-        const response = await fetchWithAuth(query, {
-            headers: { "Content-Type": "application/json" },
-        });
-        const data = await response.json();
-        placas = [];
+        const { placas: placasLocais } = await loadLocalAccessLists();
+        placas = placasLocais;
         allPlacasOptions = [];
 
-        if (data.documents) {
-            data.documents.forEach((doc) => {
-                const fields = doc.fields || {};
-                const placa = fields.placa?.stringValue || "";
-                const ativo = fields.ativo?.booleanValue !== false;
-                if (!placa) return;
-                placas.push({ id: doc.name, placa, ativo });
-            });
-        }
-
         const sortedPlates = [...placas].sort((a, b) => a.placa.localeCompare(b.placa));
-        adminPlateSelect.innerHTML = "<option value=\"\">Selecione uma placa...</option>";
-        searchPlacaSelect.innerHTML = "<option value=\"\">Selecione uma placa...</option>";
-        auditPlacaSelect.innerHTML = "<option value=\"\">Selecione uma placa...</option>";
+        if (adminPlateSelect) {
+            safeSetInnerHTML(adminPlateSelect, "<option value=\"\">Selecione uma placa...</option>");
+        }
+        if (searchPlacaSelect) {
+            safeSetInnerHTML(searchPlacaSelect, "<option value=\"\">Selecione uma placa...</option>");
+        }
+        if (auditPlacaSelect) {
+            safeSetInnerHTML(auditPlacaSelect, "<option value=\"\">Selecione uma placa...</option>");
+        }
         sortedPlates.forEach((plate) => {
-            const plateOption = document.createElement("option");
-            plateOption.value = plate.id;
-            plateOption.textContent = plate.ativo ? plate.placa : `${plate.placa} (Inativa)`;
-            adminPlateSelect.appendChild(plateOption);
+            if (adminPlateSelect) {
+                const plateOption = document.createElement("option");
+                plateOption.value = plate.id;
+                plateOption.textContent = plate.ativo ? plate.placa : `${plate.placa} (Inativa)`;
+                adminPlateSelect.appendChild(plateOption);
+            }
 
             if (plate.ativo) {
                 allPlacasOptions.push(plate.placa);
             }
-            // auditPlacaSelect will be populated based on records from 'auditoria'
         });
 
-        // render full dropdown
         renderPlacaDropdown("");
 
         await populateSearchPlacaSelectFromEvents();
@@ -574,8 +622,6 @@ async function loadPlates() {
             placaInput.placeholder = "Selecione uma placa...";
         }
 
-        // Add keyboard filter: pressing a letter will filter options to those starting with that letter
-        // attach input + dropdown behavior
         if (placaInput && placaDropdown) {
             placaInput.addEventListener("input", (e) => {
                 const v = String(placaInput.value || "").trim().toLowerCase();
@@ -590,7 +636,6 @@ async function loadPlates() {
 
             placaInput.addEventListener("keydown", (e) => {
                 if (e.key === "ArrowDown") {
-                    // focus first item
                     const first = placaDropdown.querySelector(".dropdown-item");
                     if (first) first.focus();
                     e.preventDefault();
@@ -624,7 +669,7 @@ async function loadPlates() {
 
         function renderPlacaDropdown(filter) {
             if (!placaDropdown) return;
-            placaDropdown.innerHTML = "";
+            safeSetInnerHTML(placaDropdown, "");
             const normalized = String(filter || "").toLowerCase();
             const matches = normalized ? allPlacasOptions.filter((p) => p.toLowerCase().startsWith(normalized)) : allPlacasOptions.slice();
 
@@ -640,7 +685,6 @@ async function loadPlates() {
                     hidePlacaDropdown();
                 });
                 item.addEventListener("focus", () => {
-                    // update aria-selected on focus
                     Array.from(placaDropdown.children).forEach((c) => c.setAttribute("aria-selected", "false"));
                     item.setAttribute("aria-selected", "true");
                 });
@@ -662,8 +706,7 @@ async function loadPlates() {
                 placaDropdown.appendChild(item);
             });
 
-            // ensure dropdown shows up to 6 items with scrollbar via CSS class
-            placaDropdown.style.maxHeight = "180px"; // ~6 items
+            placaDropdown.style.maxHeight = "180px";
             placaDropdown.style.overflowY = "auto";
         }
 
@@ -671,12 +714,11 @@ async function loadPlates() {
             populateSearchUsuarioSelect();
         }
 
-        // populate audit placa select from actual audit records
         if (auditPlacaSelect) {
             await populateAuditPlacaSelectFromAudit();
         }
 
-        setStatus("Placas carregadas.");
+        setStatus("Placas carregadas do arquivo local.");
     } catch (error) {
         setStatus("Erro ao carregar placas.", true);
     }
@@ -741,11 +783,11 @@ async function loadAuditPlates() {
 
 async function populateAuditPlacaSelectFromAudit() {
     if (!auditPlacaSelect) return;
-    auditPlacaSelect.innerHTML = "<option value=\"\">Todas as placas</option>";
+    safeSetInnerHTML(auditPlacaSelect, "<option value=\"\">Todas as placas</option>");
 
     const auditPlates = await loadAuditPlates();
     if (auditPlates.length === 0) {
-        auditPlacaSelect.innerHTML = "<option value=\"\">Nenhuma placa na auditoria</option>";
+        safeSetInnerHTML(auditPlacaSelect, "<option value=\"\">Nenhuma placa na auditoria</option>");
         return;
     }
 
@@ -780,13 +822,13 @@ async function populateSearchUsuarioSelect() {
 
     const eventUsers = await loadEventUsuarios();
     if (eventUsers.length === 0) {
-        searchUsuarioSelect.innerHTML = "<option value=\"\">Nenhum usuário com evento hoje</option>";
+        safeSetInnerHTML(searchUsuarioSelect, "<option value=\"\">Nenhum usuário com evento hoje</option>");
         return;
     }
 
     const sortedUsers = [...new Set(eventUsers)].sort((a, b) => a.localeCompare(b));
 
-    searchUsuarioSelect.innerHTML = "<option value=\"\">Todos os usuários</option>";
+    safeSetInnerHTML(searchUsuarioSelect, "<option value=\"\">Todos os usuários</option>");
     sortedUsers.forEach((nome) => {
         const option = document.createElement("option");
         option.value = nome;
@@ -797,11 +839,11 @@ async function populateSearchUsuarioSelect() {
 
 async function populateSearchPlacaSelectFromEvents() {
     if (!searchPlacaSelect) return;
-    searchPlacaSelect.innerHTML = "<option value=\"\">Todas as placas</option>";
+    safeSetInnerHTML(searchPlacaSelect, "<option value=\"\">Todas as placas</option>");
 
     const eventPlates = await loadEventPlates();
     if (eventPlates.length === 0) {
-        searchPlacaSelect.innerHTML = "<option value=\"\">Nenhuma placa com evento disponível</option>";
+        safeSetInnerHTML(searchPlacaSelect, "<option value=\"\">Nenhuma placa com evento disponível</option>");
         return;
     }
 
@@ -853,12 +895,23 @@ async function saveUser() {
     try {
         if (editingUserId) {
             await patchDocument(editingUserId, fields);
-            setStatus(`Usuário ${nome} atualizado com sucesso.`);
+            setStatus(`Usuário ${nome} atualizado na coleção usuarios do Firestore.`);
         } else {
             await createDocument("usuarios", fields);
-            setStatus(`Usuário ${nome} cadastrado com sucesso.`);
+            setStatus(`Usuário ${nome} cadastrado na coleção usuarios do Firestore.`);
         }
-        await loadUsuarios();
+
+        await loadFirestoreUsuarios();
+        if (adminUserSelect) {
+            safeSetInnerHTML(adminUserSelect, "<option value=\"\">Selecione um usuário...</option>");
+            firestoreUsuarios.forEach((user) => {
+                const userOption = document.createElement("option");
+                userOption.value = user.id;
+                userOption.textContent = user.ativo ? user.nome : `${user.nome} (Inativo)`;
+                adminUserSelect.appendChild(userOption);
+            });
+        }
+
         clearUserForm();
     } catch (error) {
         setStatus(error.message, true);
@@ -903,9 +956,18 @@ async function deleteUser() {
 
     try {
         await patchDocument(userId, { ativo: { booleanValue: false } });
-        await loadUsuarios();
+        await loadFirestoreUsuarios();
+        if (adminUserSelect) {
+            safeSetInnerHTML(adminUserSelect, "<option value=\"\">Selecione um usuário...</option>");
+            firestoreUsuarios.forEach((user) => {
+                const userOption = document.createElement("option");
+                userOption.value = user.id;
+                userOption.textContent = user.ativo ? user.nome : `${user.nome} (Inativo)`;
+                adminUserSelect.appendChild(userOption);
+            });
+        }
         clearUserForm();
-        setStatus("Usuário excluído com sucesso. Os eventos permanecem intactos.");
+        setStatus("Usuário desativado na coleção usuarios do Firestore.");
     } catch (error) {
         setStatus(error.message, true);
     }
@@ -992,9 +1054,9 @@ async function saveEvento() {
             },
             body: JSON.stringify(buildFirestoreDocument(fields)),
         });
-        const data = await response.json();
+        const data = await parseResponseBody(response);
         if (!response.ok) {
-            throw new Error(data.error?.message || "Falha ao registrar evento.");
+            throw new Error(data?.error?.message || data?.rawText || "Falha ao registrar evento.");
         }
         setStatus("Conferência registrada com sucesso.");
         placaInput.value = "";
@@ -1081,7 +1143,7 @@ async function searchPlaca() {
 function renderSearchResults(eventDocs) {
     if (!searchResult) return;
     searchResult.textContent = "";
-    searchResult.innerHTML = "";
+    safeSetInnerHTML(searchResult, "");
     if (editEventBtn) {
         editEventBtn.classList.add("hidden");
     }
@@ -1392,45 +1454,51 @@ function openEditEventPanel() {
 
     const oldFields = editingEventDoc.fields || {};
     const selectedUser = getFirestoreStringValue(oldFields.usuario);
-    editEventUsuario.innerHTML = "<option value=''>Selecione um usuário...</option>";
-    const activeUsers = usuarios.filter((user) => user.ativo);
-    activeUsers.forEach((user) => {
-        const option = document.createElement("option");
-        option.value = user.nome;
-        option.textContent = user.nome;
-        if (user.nome === selectedUser) {
+    if (editEventUsuario) {
+        safeSetInnerHTML(editEventUsuario, "<option value=''>Selecione um usuário...</option>");
+        const activeUsers = usuarios.filter((user) => user.ativo);
+        activeUsers.forEach((user) => {
+            const option = document.createElement("option");
+            option.value = user.nome;
+            option.textContent = user.nome;
+            if (user.nome === selectedUser) {
+                option.selected = true;
+            }
+            editEventUsuario.appendChild(option);
+        });
+        if (selectedUser && !activeUsers.some((user) => user.nome === selectedUser)) {
+            const option = document.createElement("option");
+            option.value = selectedUser;
+            option.textContent = `${selectedUser} (Inativo)`;
             option.selected = true;
+            editEventUsuario.appendChild(option);
         }
-        editEventUsuario.appendChild(option);
-    });
-    if (selectedUser && !activeUsers.some((user) => user.nome === selectedUser)) {
-        const option = document.createElement("option");
-        option.value = selectedUser;
-        option.textContent = `${selectedUser} (Inativo)`;
-        option.selected = true;
-        editEventUsuario.appendChild(option);
     }
-    editEventCliente.value = getFirestoreStringValue(oldFields.cliente);
+    if (editEventCliente) {
+        editEventCliente.value = getFirestoreStringValue(oldFields.cliente);
+    }
 
-    editEventPlaca.innerHTML = "<option value=''>Selecione uma placa...</option>";
-    const selectedPlate = getFirestoreStringValue(oldFields.placa).toUpperCase();
-    const activePlates = placas.filter((plate) => plate.ativo);
-    activePlates.forEach((plate) => {
-        const option = document.createElement("option");
-        option.value = plate.placa;
-        option.textContent = plate.placa;
-        if (plate.placa === selectedPlate) {
+    if (editEventPlaca) {
+        safeSetInnerHTML(editEventPlaca, "<option value=''>Selecione uma placa...</option>");
+        const selectedPlate = getFirestoreStringValue(oldFields.placa).toUpperCase();
+        const activePlates = placas.filter((plate) => plate.ativo);
+        activePlates.forEach((plate) => {
+            const option = document.createElement("option");
+            option.value = plate.placa;
+            option.textContent = plate.placa;
+            if (plate.placa === selectedPlate) {
+                option.selected = true;
+            }
+            editEventPlaca.appendChild(option);
+        });
+
+        if (!activePlates.some((plate) => plate.placa === selectedPlate) && selectedPlate) {
+            const option = document.createElement("option");
+            option.value = selectedPlate;
+            option.textContent = `${selectedPlate} (inativa)`;
             option.selected = true;
+            editEventPlaca.appendChild(option);
         }
-        editEventPlaca.appendChild(option);
-    });
-
-    if (!activePlates.some((plate) => plate.placa === selectedPlate) && selectedPlate) {
-        const option = document.createElement("option");
-        option.value = selectedPlate;
-        option.textContent = `${selectedPlate} (inativa)`;
-        option.selected = true;
-        editEventPlaca.appendChild(option);
     }
 }
 
@@ -1663,28 +1731,30 @@ async function dailyReport() {
 }
 
 function showAdminScreen() {
-    adminScreenPanel.classList.remove("hidden");
-    technicalPanel.classList.add("hidden");
-    mainPanel.classList.add("hidden");
-    searchPanel.classList.add("hidden");
-    adminAuthPanel.classList.remove("hidden");
-    adminDashboardPanel.classList.add("hidden");
-    adminUserPanel.classList.add("hidden");
-    adminPlatePanel.classList.add("hidden");
-    adminPinInput.value = "";
-    adminPinInput.focus();
+    if (adminScreenPanel) adminScreenPanel.classList.remove("hidden");
+    if (technicalPanel) technicalPanel.classList.add("hidden");
+    if (mainPanel) mainPanel.classList.add("hidden");
+    if (searchPanel) searchPanel.classList.add("hidden");
+    if (adminAuthPanel) adminAuthPanel.classList.remove("hidden");
+    if (adminDashboardPanel) adminDashboardPanel.classList.add("hidden");
+    if (adminUserPanel) adminUserPanel.classList.add("hidden");
+    if (adminPlatePanel) adminPlatePanel.classList.add("hidden");
+    if (adminPinInput) {
+        adminPinInput.value = "";
+        adminPinInput.focus();
+    }
 }
 
 function closeAdminPanels() {
-    adminScreenPanel.classList.add("hidden");
-    technicalPanel.classList.add("hidden");
-    mainPanel.classList.remove("hidden");
-    searchPanel.classList.add("hidden");
-    adminAuthPanel.classList.add("hidden");
-    adminDashboardPanel.classList.add("hidden");
-    adminUserPanel.classList.add("hidden");
-    adminPlatePanel.classList.add("hidden");
-    adminPinInput.value = "";
+    if (adminScreenPanel) adminScreenPanel.classList.add("hidden");
+    if (technicalPanel) technicalPanel.classList.add("hidden");
+    if (mainPanel) mainPanel.classList.remove("hidden");
+    if (searchPanel) searchPanel.classList.add("hidden");
+    if (adminAuthPanel) adminAuthPanel.classList.add("hidden");
+    if (adminDashboardPanel) adminDashboardPanel.classList.add("hidden");
+    if (adminUserPanel) adminUserPanel.classList.add("hidden");
+    if (adminPlatePanel) adminPlatePanel.classList.add("hidden");
+    if (adminPinInput) adminPinInput.value = "";
 }
 
 async function showAdminAuth() {
@@ -1715,46 +1785,67 @@ function enterAdminMode(leaderName) {
 }
 
 async function openAdminUsers() {
+    if (!adminUserPanel) {
+        setStatus("Painel de usuários não está disponível.", true);
+        return;
+    }
+
     adminUserPanel.classList.remove("hidden");
-    adminPlatePanel.classList.add("hidden");
+    if (adminPlatePanel) adminPlatePanel.classList.add("hidden");
     clearUserForm();
-    await loadUsuarios();
+    await loadFirestoreUsuarios();
+    if (adminUserSelect) {
+        safeSetInnerHTML(adminUserSelect, "<option value=\"\">Selecione um usuário...</option>");
+        firestoreUsuarios.forEach((user) => {
+            const userOption = document.createElement("option");
+            userOption.value = user.id;
+            userOption.textContent = user.ativo ? user.nome : `${user.nome} (Inativo)`;
+            adminUserSelect.appendChild(userOption);
+        });
+    }
 }
 
 async function openAdminPlates() {
+    if (!adminPlatePanel) {
+        setStatus("Painel de placas não está disponível.", true);
+        return;
+    }
+
     adminPlatePanel.classList.remove("hidden");
-    adminUserPanel.classList.add("hidden");
+    if (adminUserPanel) adminUserPanel.classList.add("hidden");
     clearPlateForm();
     await loadPlates();
 }
 
 function closePlateAdminPanel() {
-    adminPlatePanel.classList.add("hidden");
-    adminUserPanel.classList.add("hidden");
-    adminDashboardPanel.classList.remove("hidden");
+    if (adminPlatePanel) adminPlatePanel.classList.add("hidden");
+    if (adminUserPanel) adminUserPanel.classList.add("hidden");
+    if (adminDashboardPanel) adminDashboardPanel.classList.remove("hidden");
 }
 
 function closePlateAdminPanelAndReturn() {
     closePlateAdminPanel();
-    adminScreenPanel.classList.add("hidden");
-    technicalPanel.classList.add("hidden");
-    mainPanel.classList.remove("hidden");
-    searchPanel.classList.add("hidden");
+    if (adminScreenPanel) adminScreenPanel.classList.add("hidden");
+    if (technicalPanel) technicalPanel.classList.add("hidden");
+    if (mainPanel) mainPanel.classList.remove("hidden");
+    if (searchPanel) searchPanel.classList.add("hidden");
 }
 
 function handleAdminUserSelectChange() {
+    if (!adminUserSelect) return;
     const selectedId = adminUserSelect.value;
     if (!selectedId) {
         clearUserForm();
         return;
     }
-    const user = usuarios.find((u) => u.id === selectedId);
+    const user = firestoreUsuarios.find((u) => u.id === selectedId);
     if (user) {
         setUserForm(user);
     }
 }
 
 function handleAdminPlateSelectChange() {
+    if (!adminPlateSelect) return;
     const selectedId = adminPlateSelect.value;
     if (!selectedId) {
         clearPlateForm();
@@ -1769,34 +1860,50 @@ function handleAdminPlateSelectChange() {
 async function validateAdminPin() {
     const pin = adminPinInput.value.trim();
     if (!pin) {
-        setStatus("Informe o PIN do líder.", true);
+        setStatus("Informe o PIN.", true);
         return;
     }
 
     try {
-        await loadUsuarios();
+        const response = await fetchWithAuth(`${FIRESTORE_URL}/usuarios?pageSize=200`, {
+            headers: { "Content-Type": "application/json" },
+        });
+        const data = await parseResponseBody(response);
+
+        if (!response.ok) {
+            throw new Error(data?.error?.message || data?.rawText || "Falha ao consultar usuários no Firestore.");
+        }
+
+        const firestoreUsers = Array.isArray(data?.documents) ? data.documents : [];
+        const activeLeaders = firestoreUsers
+            .map((doc) => {
+                const fields = doc.fields || {};
+                return {
+                    nome: getFirestoreStringValue(fields.nome),
+                    lider: getFirestoreBooleanValue(fields.lider),
+                    ativo: fields.ativo !== undefined ? getFirestoreBooleanValue(fields.ativo) : true,
+                    password: getFirestoreStringValue(fields.password),
+                };
+            })
+            .filter((user) => user.lider && user.ativo && user.nome)
+            .map((user) => ({ nome: user.nome, password: String(user.password || "").trim() }));
+
+        if (activeLeaders.length === 0) {
+            setStatus("Nenhum líder ativo encontrado na coleção usuarios do Firestore.", true);
+            return;
+        }
+
+        const leader = activeLeaders.find((user) => user.password === pin);
+        if (!leader) {
+            console.log("Líderes ativos disponíveis:", activeLeaders);
+            setStatus("PIN inválido. Apenas líderes com PIN cadastrado podem acessar.", true);
+            return;
+        }
+
+        enterAdminMode(leader.nome);
     } catch (error) {
-        setStatus("Erro ao validar PIN. Tente novamente.", true);
-        return;
+        setStatus(error.message, true);
     }
-
-    const activeLeaders = usuarios
-        .filter((user) => user.lider && user.ativo)
-        .map((user) => ({ nome: user.nome, password: String(user.password || "").trim() }));
-
-    if (activeLeaders.length === 0) {
-        setStatus("Nenhum líder ativo encontrado. Verifique o cadastro de usuários.", true);
-        return;
-    }
-
-    const leader = activeLeaders.find((user) => user.password === pin);
-    if (!leader) {
-        console.log("Líderes ativos disponíveis:", activeLeaders);
-        setStatus("PIN inválido. Apenas líderes com PIN cadastrado podem acessar.", true);
-        return;
-    }
-
-    enterAdminMode(leader.nome);
 }
 
 async function init() {
