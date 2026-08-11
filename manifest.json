@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "Conferencia NF",
     "description": "Extensão Chrome para registrar e localizar conferências de cargas.",
-    "version": "0.1.0",
+    "version": "1.1.0",
     "action": {
         "default_popup": "popup.html"
     },
